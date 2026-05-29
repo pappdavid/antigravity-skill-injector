@@ -1,40 +1,129 @@
+<div align="center">
+
 # Antigravity Skill Injector
 
-The **Antigravity Skill Injector** is a dynamic "Zero Context Bloat" skill injection architecture for the Antigravity Desktop App. 
+**Zero-context-bloat dynamic skill loading for the Antigravity Desktop App**
+
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![MCP](https://img.shields.io/badge/Protocol-MCP-FF6B35)](https://modelcontextprotocol.io)
+[![Antigravity](https://img.shields.io/badge/App-Antigravity-8B5CF6)](https://antigravity.so)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
+
+---
 
 ## The Problem
-Antigravity natively loads all your skills (plugins) into the system prompt at the start of every conversation. If you have dozens of skills, this instantly consumes thousands of tokens, bloats your context window, and slows down your agent.
+
+Antigravity loads every skill into the system prompt at conversation start. With dozens of skills, that's **thousands of wasted tokens** before you write a single word — context bloat, slower responses, and higher cost on every turn.
 
 ## The Solution
-This tool provides a **Rust-based MCP Server** combined with **native UI stubs**. 
-1. **Native UI Integration**: Your skills still show up in the Antigravity UI with their real names and descriptions, but they consume virtually zero context.
-2. **Dynamic Payload Loading**: When the agent decides to use a skill, it calls out to the local Rust MCP server to fetch the massive prompt payload *only* when it's actually needed.
 
-## Setup Instructions
+Replace heavy `SKILL.md` files with **20-token stubs**. Skills still appear in the Antigravity UI with real names and descriptions. When the agent actually needs a skill, it calls the local Rust MCP server to fetch the full payload **on demand**.
 
-1. **Clone the repo**
-   ```bash
-   git clone https://github.com/yourusername/antigravity-skill-injector.git
-   cd antigravity-skill-injector
-   ```
+---
 
-2. **Run the Installer**
-   ```bash
-   ./install.sh
-   ```
-   The installer will:
-   - Compile the ultra-fast Rust MCP server.
-   - Ask for the path to your existing Antigravity skills.
-   - Migrate them to a static JSON registry.
-   - Inject minified "stub" files into your Antigravity plugins directory.
+## How It Works
 
-3. **Configure Antigravity**
-   At the end of the script, it will provide a JSON block. Open your `mcp_config.json` (typically located in `~/.gemini/config/mcp_config.json`) and paste the block inside your `mcpServers` object.
+```mermaid
+flowchart TB
+    subgraph Before["❌ Before — Context Bloat"]
+        SP1[System Prompt] -->|"Skill A: 500 tokens\nSkill B: 800 tokens\nSkill C: 600 tokens\n... 30 more skills"| CTX1[😩 Context Window Saturated]
+    end
 
-4. **Restart**
-   Restart your Antigravity Desktop App. You will now see all your skills natively in the UI with zero token bloat!
+    subgraph After["✅ After — Zero Bloat"]
+        SP2[System Prompt] -->|"Skill A: 20 tokens\nSkill B: 20 tokens\nSkill C: 20 tokens"| CTX2[Context Window Free]
+        CTX2 -->|Agent needs Skill B| MCP[Rust MCP Server]
+        MCP -->|fetch_skill payload| REG[skills_registry.json]
+        REG -->|"Full 800-token payload\n(only when needed)"| CTX2
+    end
+```
 
-## Architecture Details
-- **`mcp-server/`**: A low-resource compiled Rust binary that acts as the JSON-RPC interface for Antigravity.
-- **`scripts/migrate_skills.py`**: Parses heavy `SKILL.md` YAML files into a structured `skills_registry.json`.
-- **`scripts/generate_stubs.py`**: Generates the ~20 token stub files that populate the Antigravity UI.
+---
+
+## Architecture
+
+```mermaid
+graph LR
+    A[Antigravity UI] -->|Renders stub files| B[~/.gemini/plugins/]
+    B -->|20-token stub per skill| C[Agent Context]
+    C -->|mcp.fetch_skill call| D[Rust MCP Server\nlocal binary]
+    D -->|reads| E[skills_registry.json]
+    E -->|full SKILL.md payload| D
+    D -->|dynamic injection| C
+
+    F[migrate_skills.py] -->|parses SKILL.md files| E
+    G[generate_stubs.py] -->|writes stub files| B
+```
+
+---
+
+## Setup
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/pappdavid/antigravity-skill-injector.git
+cd antigravity-skill-injector
+./install.sh
+```
+
+The installer will:
+- Compile the Rust MCP server (requires Rust 1.75+)
+- Ask for your existing Antigravity skills directory
+- Migrate all `SKILL.md` files to `skills_registry.json`
+- Generate 20-token stub files in your Antigravity plugins directory
+
+### 2. Configure Antigravity
+
+The installer prints an MCP config block. Add it to `~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "skill-injector": {
+      "command": "/path/to/antigravity-skill-injector/src/mcp-server/target/release/skill-injector-mcp",
+      "args": ["--registry", "/path/to/skills_registry.json"]
+    }
+  }
+}
+```
+
+### 3. Restart Antigravity
+
+All your skills appear in the UI with zero token overhead. The agent fetches full payloads on demand.
+
+---
+
+## Components
+
+| Component | Language | Description |
+|---|---|---|
+| `src/mcp-server/` | **Rust** | Ultra-fast local MCP server — JSON-RPC over stdio |
+| `scripts/migrate_skills.py` | **Python** | Parses `SKILL.md` YAML frontmatter → `skills_registry.json` |
+| `scripts/generate_stubs.py` | **Python** | Generates 20-token stub files for the Antigravity UI |
+| `install.sh` | **Bash** | End-to-end installer: compile → migrate → inject → configure |
+
+---
+
+## Token Savings
+
+```
+Typical setup: 30 skills × 600 tokens average = 18,000 tokens/conversation
+After injection: 30 skills × 20 tokens = 600 tokens/conversation
+
+Savings: ~17,400 tokens per conversation (~97% reduction)
+```
+
+---
+
+## Tech Stack
+
+<div align="center">
+
+![Rust](https://skillicons.dev/icons?i=rust)&nbsp;
+![Python](https://skillicons.dev/icons?i=python)&nbsp;
+![Bash](https://skillicons.dev/icons?i=bash)
+
+</div>
