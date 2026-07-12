@@ -2,66 +2,53 @@
 
 # Antigravity Skill Injector
 
-**Zero-context-bloat dynamic skill loading for the Antigravity Desktop App**
+**Proof-of-concept for loading skill documents on demand through a local Rust MCP server**
 
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-2024-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
-[![MCP](https://img.shields.io/badge/Protocol-MCP-FF6B35)](https://modelcontextprotocol.io)
-[![Antigravity](https://img.shields.io/badge/App-Antigravity-8B5CF6)](https://antigravity.so)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
----
+## Scope
 
-## The Problem
+This repository explores replacing full local `SKILL.md` documents with small UI-visible stubs while serving the original skill content from a local JSON registry through MCP tools.
 
-Antigravity loads every skill into the system prompt at conversation start. With dozens of skills, that's **thousands of wasted tokens** before you write a single word — context bloat, slower responses, and higher cost on every turn.
+It contains:
 
-## The Solution
+- a small Rust JSON-RPC/MCP server with `list_skills` and `load_skill` tools
+- a Python migration script that extracts skill metadata and content into a registry
+- a Python stub generator
+- an interactive shell installer that builds the server and prints the configuration block to add manually
 
-Replace heavy `SKILL.md` files with **20-token stubs**. Skills still appear in the Antigravity UI with real names and descriptions. When the agent actually needs a skill, it calls the local Rust MCP server to fetch the full payload **on demand**.
+## Current status and limits
 
----
-
-## How It Works
-
-```mermaid
-flowchart TB
-    subgraph Before["❌ Before — Context Bloat"]
-        SP1[System Prompt] -->|"Skill A: 500 tokens\nSkill B: 800 tokens\nSkill C: 600 tokens\n... 30 more skills"| CTX1[😩 Context Window Saturated]
-    end
-
-    subgraph After["✅ After — Zero Bloat"]
-        SP2[System Prompt] -->|"Skill A: 20 tokens\nSkill B: 20 tokens\nSkill C: 20 tokens"| CTX2[Context Window Free]
-        CTX2 -->|Agent needs Skill B| MCP[Rust MCP Server]
-        MCP -->|fetch_skill payload| REG[skills_registry.json]
-        REG -->|"Full 800-token payload\n(only when needed)"| CTX2
-    end
-```
-
----
+- Proof-of-concept, not a supported Antigravity extension or production package.
+- CI checks that the Rust server compiles, the Python scripts parse, and the shell installer is syntactically valid.
+- No automated integration test currently launches the Antigravity desktop application.
+- Token usage has not been benchmarked, so this repository makes no percentage-saving or “zero overhead” claim.
+- Stub size varies with skill names and descriptions; it is not guaranteed to be a fixed token count.
+- The migration process writes generated files. Back up the source skill directory and inspect the output before replacing an existing setup.
 
 ## Architecture
 
 ```mermaid
 graph LR
-    A[Antigravity UI] -->|Renders stub files| B[~/.gemini/plugins/]
-    B -->|20-token stub per skill| C[Agent Context]
-    C -->|mcp.fetch_skill call| D[Rust MCP Server\nlocal binary]
-    D -->|reads| E[skills_registry.json]
-    E -->|full SKILL.md payload| D
-    D -->|dynamic injection| C
-
-    F[migrate_skills.py] -->|parses SKILL.md files| E
-    G[generate_stubs.py] -->|writes stub files| B
+    Skills[Existing SKILL.md files] --> Migrator[Python registry builder]
+    Migrator --> Registry[skills_registry.json]
+    Registry --> Server[Local Rust MCP server]
+    Generator[Python stub generator] --> Stubs[UI-visible stub files]
+    Agent[MCP client] -->|list_skills / load_skill| Server
+    Server --> Registry
 ```
-
----
 
 ## Setup
 
-### 1. Clone and install
+Requirements:
+
+- Rust toolchain supporting edition 2024
+- Python 3.9+
+- an MCP-capable local client
 
 ```bash
 git clone https://github.com/pappdavid/antigravity-skill-injector.git
@@ -69,61 +56,40 @@ cd antigravity-skill-injector
 ./install.sh
 ```
 
-The installer will:
-- Compile the Rust MCP server (requires Rust 1.75+)
-- Ask for your existing Antigravity skills directory
-- Migrate all `SKILL.md` files to `skills_registry.json`
-- Generate 20-token stub files in your Antigravity plugins directory
+The installer:
 
-### 2. Configure Antigravity
+1. builds the Rust server in release mode
+2. creates local data/config directories
+3. optionally migrates an existing skills directory into `skills_registry.json`
+4. generates stub files
+5. prints an MCP configuration block for manual installation
 
-The installer prints an MCP config block. Add it to `~/.gemini/config/mcp_config.json`:
+The server accepts the registry path as its first command-line argument. The generated configuration uses that explicit path.
+
+Example configuration shape:
 
 ```json
 {
   "mcpServers": {
     "skill-injector": {
-      "command": "/path/to/antigravity-skill-injector/src/mcp-server/target/release/skill-injector-mcp",
-      "args": ["--registry", "/path/to/skills_registry.json"]
+      "command": "/absolute/path/to/mcp-skill-injector",
+      "args": ["/absolute/path/to/skills_registry.json"]
     }
   }
 }
 ```
 
-### 3. Restart Antigravity
+Exact configuration locations and compatibility may vary by client version.
 
-All your skills appear in the UI with zero token overhead. The agent fetches full payloads on demand.
+## MCP tools
 
----
+- `list_skills`: lists registry entries and descriptions
+- `load_skill`: returns the stored instructions and optional schema for one skill ID
 
-## Components
+## Verification
 
-| Component | Language | Description |
-|---|---|---|
-| `src/mcp-server/` | **Rust** | Ultra-fast local MCP server — JSON-RPC over stdio |
-| `scripts/migrate_skills.py` | **Python** | Parses `SKILL.md` YAML frontmatter → `skills_registry.json` |
-| `scripts/generate_stubs.py` | **Python** | Generates 20-token stub files for the Antigravity UI |
-| `install.sh` | **Bash** | End-to-end installer: compile → migrate → inject → configure |
-
----
-
-## Token Savings
-
+```bash
+cargo check --manifest-path src/mcp-server/Cargo.toml
+python3 -m py_compile scripts/migrate_skills.py scripts/generate_stubs.py
+bash -n install.sh
 ```
-Typical setup: 30 skills × 600 tokens average = 18,000 tokens/conversation
-After injection: 30 skills × 20 tokens = 600 tokens/conversation
-
-Savings: ~17,400 tokens per conversation (~97% reduction)
-```
-
----
-
-## Tech Stack
-
-<div align="center">
-
-![Rust](https://skillicons.dev/icons?i=rust)&nbsp;
-![Python](https://skillicons.dev/icons?i=python)&nbsp;
-![Bash](https://skillicons.dev/icons?i=bash)
-
-</div>

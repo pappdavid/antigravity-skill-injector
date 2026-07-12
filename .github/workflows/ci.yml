@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check Rust server
+        run: cargo check --manifest-path src/mcp-server/Cargo.toml
+      - name: Check Python scripts
+        run: python3 -m py_compile scripts/migrate_skills.py scripts/generate_stubs.py
+      - name: Check installer syntax
+        run: bash -n install.sh
+      - name: Smoke-test MCP initialize response
+        run: |
+          cargo build --manifest-path src/mcp-server/Cargo.toml
+          REGISTRY=$(mktemp)
+          printf '{}\n' > "$REGISTRY"
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+            | src/mcp-server/target/debug/mcp-skill-injector "$REGISTRY" \
+            | python3 -c 'import json,sys; data=json.loads(sys.stdin.readline()); assert data["id"] == 1; assert data["result"]["serverInfo"]["name"] == "mcp-skill-injector"'
